@@ -1,0 +1,949 @@
+import javax.swing.*;
+import javax.swing.border.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.io.*;
+import java.util.*;
+import java.util.List;
+
+//boune back projecttt
+public class MyProgram extends JFrame {
+    // my aewsome color palletse
+    private final Color BG = new Color(8, 19, 25);
+    private final Color PANEL = new Color(17, 38, 43);
+    private final Color FELT = new Color(9, 82, 59);
+    private final Color FELT_DARK = new Color(6, 57, 43);
+    private final Color GOLD = new Color(244, 195, 83);
+    private final Color CREAM = new Color(250, 247, 235);
+    private final Color MUTED = new Color(174, 194, 190);
+    private final Color RED = new Color(190, 55, 59);
+    private final Font SMALL = new Font("Arial", Font.PLAIN, 12);
+    private final Font NORMAL = new Font("Arial", Font.PLAIN, 14);
+    private final Font BOLD = new Font("Arial", Font.BOLD, 14);
+    private final Random random = new Random();
+
+    // ---------- Game data ----------
+    private final List<Upgrade> upgradeCatalog = new ArrayList<Upgrade>();
+    private final List<Upgrade> ownedUpgrades = new ArrayList<Upgrade>();
+    private final List<Upgrade> shopOffers = new ArrayList<Upgrade>();
+    private final List<String> history = new ArrayList<String>();
+    private final Set<String> achievements = new LinkedHashSet<String>();
+    private final Set<String> seenUpgradeIds = new HashSet<String>();
+    private List<Card> playerHand = new ArrayList<Card>();
+    private List<Card> dealerHand = new ArrayList<Card>();
+    private Deck deck;
+
+    private int coins = 15;
+    private int gamesPlayed, wins, losses, pushes, naturalBlackjacks;
+    private int currentStreak, bestStreak, totalCoinsEarned, totalCoinsSpent;
+    private int upgradesBought, totalHits, doubleDownWins;
+    private int shopVisits, rerollsUsed;
+    private int lastReward;
+    private String lastResult = "Welcome! Build your strategy and beat the dealer.";
+
+    private boolean roundActive, roundFinished, shopOpen, dealerRevealed;
+    private boolean doubledDown, peekUsed, shieldUsed, freeRerollUsed;
+    private boolean firstHit, playerStood;
+    private int roundNumber;
+
+    // ---------- Interface ----------
+    private JPanel mainPanel, tablePanel, dealerCardsPanel, playerCardsPanel;
+    private JPanel bottomPanel, dashboardPanel;
+    private JLabel coinsValue, progressValue, recordValue, streakValue;
+    private JLabel dealerTotal, playerTotal, statusLabel, roundLabel;
+    private JProgressBar shopProgress;
+    private JButton hitButton, standButton, doubleButton, peekButton;
+    private JButton startButton, replayButton, upgradesButton;
+    private JButton historyButton, statsButton, helpButton, saveButton;
+
+    private static final String SAVE_FILE = "blackjack_builder_save.properties";
+
+    public MyProgram() {
+        super("BLACKJACK BUILDER DELUXE");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setMinimumSize(new Dimension(940, 700));
+        setSize(1120, 820);
+        setLocationRelativeTo(null);
+        createUpgradeCatalog();
+        loadProgress();
+        buildInterface();
+        refreshReadyScreen();
+        setVisible(true);
+        addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) { saveProgress(); }
+        });
+    }
+
+    private void buildInterface() {
+        mainPanel = new JPanel(new BorderLayout(14, 14));
+        mainPanel.setBackground(BG);
+        mainPanel.setBorder(new EmptyBorder(16, 18, 16, 18));
+        setContentPane(mainPanel);
+
+        mainPanel.add(buildHeader(), BorderLayout.NORTH);
+        mainPanel.add(buildTable(), BorderLayout.CENTER);
+        mainPanel.add(buildFooter(), BorderLayout.SOUTH);
+        refreshDashboard();
+    }
+
+    private JPanel buildHeader() {
+        JPanel header = new JPanel(new BorderLayout(12, 8));
+        header.setOpaque(false);
+        JPanel brand = new JPanel();
+        brand.setOpaque(false);
+        brand.setLayout(new BoxLayout(brand, BoxLayout.Y_AXIS));
+        JLabel title = new JLabel("BLACKJACK BUILDER");
+        title.setForeground(GOLD);
+        title.setFont(new Font("Arial", Font.BOLD, 29));
+        JLabel subtitle = new JLabel("BUILD YOUR DECK. MASTER THE TABLE.");
+        subtitle.setForeground(MUTED);
+        subtitle.setFont(new Font("Arial", Font.BOLD, 10));
+        brand.add(title);
+        brand.add(Box.createVerticalStrut(3));
+        brand.add(subtitle);
+
+        dashboardPanel = new JPanel(new GridLayout(2, 2, 10, 5));
+        dashboardPanel.setOpaque(false);
+        coinsValue = dashboardLabel("COINS  " + coins);
+        progressValue = dashboardLabel("SHOP  0 / 5");
+        recordValue = dashboardLabel("W-L-P  0-0-0");
+        streakValue = dashboardLabel("STREAK  0  |  BEST  0");
+        dashboardPanel.add(coinsValue);
+        dashboardPanel.add(progressValue);
+        dashboardPanel.add(recordValue);
+        dashboardPanel.add(streakValue);
+        header.add(brand, BorderLayout.WEST);
+        header.add(dashboardPanel, BorderLayout.EAST);
+        return header;
+    }
+
+    private JLabel dashboardLabel(String text) {
+        JLabel label = new JLabel(text, SwingConstants.RIGHT);
+        label.setForeground(GOLD);
+        label.setFont(new Font("Arial", Font.BOLD, 13));
+        return label;
+    }
+
+    private JPanel buildTable() {
+        tablePanel = new JPanel(new BorderLayout(12, 12));
+        tablePanel.setBackground(FELT);
+        tablePanel.setBorder(new CompoundBorder(new LineBorder(GOLD, 2, true),
+                new EmptyBorder(16, 18, 16, 18)));
+
+        JPanel feltTop = new JPanel(new BorderLayout());
+        feltTop.setOpaque(false);
+        JLabel dealerName = tableHeading("DEALER");
+        dealerTotal = tableHeading("TOTAL  —");
+        feltTop.add(dealerName, BorderLayout.WEST);
+        feltTop.add(dealerTotal, BorderLayout.EAST);
+        dealerCardsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 9, 8));
+        dealerCardsPanel.setOpaque(false);
+        JPanel dealerArea = new JPanel(new BorderLayout(5, 5));
+        dealerArea.setOpaque(false);
+        dealerArea.add(feltTop, BorderLayout.NORTH);
+        dealerArea.add(dealerCardsPanel, BorderLayout.CENTER);
+
+        JPanel playerTop = new JPanel(new BorderLayout());
+        playerTop.setOpaque(false);
+        JLabel playerName = tableHeading("YOUR HAND");
+        playerTotal = tableHeading("TOTAL  0");
+        playerTop.add(playerName, BorderLayout.WEST);
+        playerTop.add(playerTotal, BorderLayout.EAST);
+        playerCardsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 9, 8));
+        playerCardsPanel.setOpaque(false);
+        JPanel playerArea = new JPanel(new BorderLayout(5, 5));
+        playerArea.setOpaque(false);
+        playerArea.add(playerTop, BorderLayout.NORTH);
+        playerArea.add(playerCardsPanel, BorderLayout.CENTER);
+
+        JPanel hands = new JPanel(new GridLayout(2, 1, 10, 18));
+        hands.setOpaque(false);
+        hands.add(dealerArea);
+        hands.add(playerArea);
+
+        JPanel lower = new JPanel(new BorderLayout(8, 8));
+        lower.setOpaque(false);
+        statusLabel = new JLabel(lastResult, SwingConstants.CENTER);
+        statusLabel.setForeground(CREAM);
+        statusLabel.setFont(new Font("Arial", Font.BOLD, 17));
+        statusLabel.setBorder(new EmptyBorder(6, 4, 4, 4));
+        roundLabel = new JLabel("ROUND 1", SwingConstants.CENTER);
+        roundLabel.setForeground(GOLD);
+        roundLabel.setFont(new Font("Arial", Font.BOLD, 11));
+        lower.add(roundLabel, BorderLayout.NORTH);
+        lower.add(statusLabel, BorderLayout.CENTER);
+        shopProgress = new JProgressBar(0, 5);
+        shopProgress.setValue(0);
+        shopProgress.setStringPainted(true);
+        shopProgress.setString("0 / 5 GAMES UNTIL SHOP");
+        shopProgress.setForeground(GOLD);
+        shopProgress.setBackground(FELT_DARK);
+        shopProgress.setBorder(new LineBorder(new Color(5, 45, 35), 1, true));
+        lower.add(shopProgress, BorderLayout.SOUTH);
+
+        tablePanel.add(hands, BorderLayout.CENTER);
+        tablePanel.add(lower, BorderLayout.SOUTH);
+        return tablePanel;
+    }
+
+    private JLabel tableHeading(String text) {
+        JLabel label = new JLabel(text);
+        label.setForeground(GOLD);
+        label.setFont(new Font("Arial", Font.BOLD, 16));
+        return label;
+    }
+
+    private JPanel buildFooter() {
+        bottomPanel = new JPanel(new BorderLayout(8, 8));
+        bottomPanel.setOpaque(false);
+        JPanel playControls = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 2));
+        playControls.setOpaque(false);
+        hitButton = makeButton("HIT", new Color(36, 132, 91));
+        standButton = makeButton("STAND", new Color(166, 112, 40));
+        doubleButton = makeButton("DOUBLE DOWN", new Color(126, 79, 155));
+        peekButton = makeButton("PEEK", new Color(57, 93, 135));
+        startButton = makeButton("START GAME", new Color(36, 132, 91));
+        replayButton = makeButton("PLAY AGAIN", new Color(36, 132, 91));
+        hitButton.addActionListener(e -> hit());
+        standButton.addActionListener(e -> stand());
+        doubleButton.addActionListener(e -> doubleDown());
+        peekButton.addActionListener(e -> peek());
+        startButton.addActionListener(e -> startRound());
+        replayButton.addActionListener(e -> startRound());
+        playControls.add(hitButton);
+        playControls.add(standButton);
+        playControls.add(doubleButton);
+        playControls.add(peekButton);
+        playControls.add(startButton);
+        playControls.add(replayButton);
+
+        JPanel utilityControls = new JPanel(new FlowLayout(FlowLayout.CENTER, 7, 2));
+        utilityControls.setOpaque(false);
+        upgradesButton = makeButton("MY UPGRADES", new Color(56, 76, 111));
+        historyButton = makeButton("HISTORY", new Color(56, 76, 111));
+        statsButton = makeButton("STATISTICS", new Color(56, 76, 111));
+        helpButton = makeButton("HOW TO PLAY", new Color(78, 79, 84));
+        saveButton = makeButton("SAVE", new Color(78, 79, 84));
+        upgradesButton.addActionListener(e -> showUpgrades());
+        historyButton.addActionListener(e -> showHistory());
+        statsButton.addActionListener(e -> showStatistics());
+        helpButton.addActionListener(e -> showHelp());
+        saveButton.addActionListener(e -> { saveProgress(); showMessage("Your progress has been saved."); });
+        utilityControls.add(upgradesButton);
+        utilityControls.add(historyButton);
+        utilityControls.add(statsButton);
+        utilityControls.add(helpButton);
+        utilityControls.add(saveButton);
+        bottomPanel.add(playControls, BorderLayout.NORTH);
+        bottomPanel.add(utilityControls, BorderLayout.SOUTH);
+        return bottomPanel;
+    }
+
+    private JButton makeButton(String text, Color color) {
+        JButton b = new JButton(text);
+        b.setFont(new Font("Arial", Font.BOLD, 12));
+        b.setForeground(Color.WHITE);
+        b.setBackground(color);
+        b.setFocusPainted(false);
+        b.setOpaque(true);
+        b.setBorder(new CompoundBorder(new LineBorder(GOLD, 1, true), new EmptyBorder(9, 13, 9, 13)));
+        b.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        return b;
+    }
+
+    private void refreshDashboard() {
+        coinsValue.setText("COINS  " + coins);
+        progressValue.setText("SHOP  " + (gamesPlayed % 5) + " / 5");
+        recordValue.setText("W-L-P  " + wins + "-" + losses + "-" + pushes);
+        streakValue.setText("STREAK  " + currentStreak + "  |  BEST  " + bestStreak);
+        shopProgress.setValue(gamesPlayed % 5);
+        shopProgress.setString((gamesPlayed % 5) + " / 5 GAMES UNTIL NEXT SHOP");
+        roundLabel.setText("ROUND " + (gamesPlayed + (roundActive ? 1 : 0) + 1));
+    }
+
+    private void refreshReadyScreen() {
+        roundActive = false;
+        roundFinished = gamesPlayed > 0;
+        playerHand.clear();
+        dealerHand.clear();
+        dealerRevealed = false;
+        renderHands(false);
+        statusLabel.setText(lastResult + "  " + (5 - gamesPlayed % 5) + " game(s) until the next shop.");
+        hitButton.setVisible(false);
+        standButton.setVisible(false);
+        doubleButton.setVisible(false);
+        peekButton.setVisible(false);
+        startButton.setVisible(!shopOpen);
+        replayButton.setVisible(false);
+        upgradesButton.setEnabled(!shopOpen);
+        historyButton.setEnabled(!shopOpen);
+        statsButton.setEnabled(!shopOpen);
+        helpButton.setEnabled(!shopOpen);
+        saveButton.setEnabled(!shopOpen);
+        refreshDashboard();
+    }
+
+    // ---------- Round flow ----------
+    private void startRound() {
+        if (roundActive || shopOpen) return;
+        playerHand = new ArrayList<Card>();
+        dealerHand = new ArrayList<Card>();
+        deck = new Deck();
+        roundActive = true;
+        roundFinished = false;
+        dealerRevealed = false;
+        doubledDown = false;
+        peekUsed = false;
+        shieldUsed = false;
+        firstHit = false;
+        playerStood = false;
+        totalHits = totalHits;
+        playerHand.add(deck.draw());
+        dealerHand.add(deck.draw());
+        playerHand.add(deck.draw());
+        dealerHand.add(deck.draw());
+        lastReward = 0;
+        hitButton.setVisible(true);
+        standButton.setVisible(true);
+        doubleButton.setVisible(canDoubleDown());
+        peekButton.setVisible(has("peek"));
+        peekButton.setEnabled(true);
+        startButton.setVisible(false);
+        replayButton.setVisible(false);
+        upgradesButton.setEnabled(false);
+        historyButton.setEnabled(false);
+        statsButton.setEnabled(false);
+        helpButton.setEnabled(false);
+        saveButton.setEnabled(false);
+        statusLabel.setText("Your turn. Hit, Stand, or Double Down.");
+        renderHands(false);
+        refreshDashboard();
+        if (isNatural(playerHand)) {
+            statusLabel.setText("Natural Blackjack! The dealer will reveal their hand.");
+            stand();
+        }
+    }
+
+    private void hit() {
+        if (!roundActive) return;
+        playerHand.add(deck.draw());
+        firstHit = true;
+        totalHits++;
+        int value = playerTotal();
+        if (value > 21 && !shieldUsed && canUseBustShield(value)) {
+            shieldUsed = true;
+            statusLabel.setText("A protective upgrade activated! Your bust was prevented.");
+            value = playerTotal();
+        }
+        renderHands(false);
+        if (value > 21) {
+            settleRound("BUST! The dealer wins.", false, false);
+        } else if (value == 21) {
+            statusLabel.setText("21! You automatically stand.");
+            stand();
+        } else {
+            statusLabel.setText("You drew " + playerHand.get(playerHand.size() - 1) + ". Your total is " + value + ".");
+            doubleButton.setVisible(false);
+        }
+    }
+
+    private boolean canUseBustShield(int value) {
+        return (value == 22 && has("shield22")) || ((value == 23 || value == 24) && has("shield24")) || (value == 25 && has("shield25"));
+    }
+
+    private void stand() {
+        if (!roundActive) return;
+        playerStood = true;
+        dealerRevealed = true;
+        while (dealerTotal() < dealerTarget()) dealerHand.add(deck.draw());
+        renderHands(true);
+        int p = playerTotal();
+        int d = dealerTotal();
+        boolean pn = isNatural(playerHand);
+        boolean dn = isNatural(dealerHand);
+        if (dn && !pn) settleRound("The dealer has a natural Blackjack. Dealer wins.", false, false);
+        else if (pn && !dn) settleRound("NATURAL BLACKJACK! YOU WIN!", true, true);
+        else if (d > 21) settleRound("The dealer busted! YOU WIN!", true, false);
+        else if (p > d) settleRound("YOU WIN! Your hand beat the dealer.", true, false);
+        else if (p < d) settleRound("The dealer wins this round.", false, false);
+        else settleRound("PUSH! It's a tie. No coins gained or lost.", false, false, true);
+    }
+
+    private boolean canDoubleDown() {
+        return roundActive && playerHand.size() == 2 && !firstHit && !doubledDown;
+    }
+
+    private void doubleDown() {
+        if (!canDoubleDown()) return;
+        doubledDown = true;
+        playerHand.add(deck.draw());
+        totalHits++;
+        renderHands(false);
+        if (playerTotal() > 21) settleRound("DOUBLE DOWN BUST! The dealer wins.", false, false);
+        else stand();
+    }
+
+    private void peek() {
+        if (!roundActive || !has("peek") || peekUsed) return;
+        peekUsed = true;
+        dealerRevealed = true;
+        renderHands(false);
+        peekButton.setEnabled(false);
+        statusLabel.setText("Your Peek upgrade reveals the dealer's hidden card. Choose carefully!");
+    }
+
+    private void settleRound(String message, boolean won, boolean natural) {
+        settleRound(message, won, natural, false);
+    }
+
+    private void settleRound(String message, boolean won, boolean natural, boolean push) {
+        if (!roundActive) return;
+        roundActive = false;
+        roundFinished = true;
+        dealerRevealed = true;
+        gamesPlayed++;
+        int p = playerTotal();
+        int d = dealerTotal();
+        int reward = 0;
+
+        if (push) {
+            pushes++;
+            currentStreak = 0;
+        } else if (won) {
+            wins++;
+            currentStreak++;
+            bestStreak = Math.max(bestStreak, currentStreak);
+            reward = 4 + random.nextInt(4) + bonus("wincoins");
+            if (natural) { naturalBlackjacks++; reward += bonus("naturalcoins"); }
+            if (d > 21) reward += bonus("dealerbustcoins");
+            if (p >= 20) reward += bonus("highhandcoins");
+            if (d <= 21 && p - d >= 5) reward += bonus("margincoins");
+            if (containsRank(playerHand, "7")) reward += bonus("sevencoins");
+            if (containsRoyalSet(playerHand)) reward += bonus("royalcoins");
+            if (doubledDown) { reward += bonus("doublecoins"); doubleDownWins++; }
+            reward += bonus("streakcoins") * Math.max(0, currentStreak - 1);
+            coins += reward;
+            totalCoinsEarned += reward;
+        } else {
+            losses++;
+            currentStreak = 0;
+        }
+        lastReward = reward;
+        if (reward > 0) message += "  +" + reward + " coins!";
+        if (natural && won) message += "  (NATURAL BLACKJACK)";
+        lastResult = message;
+        String result = push ? "PUSH" : (won ? "WIN" : "LOSS");
+        history.add(0, "Game " + gamesPlayed + "  |  " + result + "  |  You " + p + " — Dealer " + d + "  |  +" + reward + " coins");
+        if (history.size() > 30) history.remove(history.size() - 1);
+
+        renderHands(true);
+        statusLabel.setText(message);
+        hitButton.setVisible(false);
+        standButton.setVisible(false);
+        doubleButton.setVisible(false);
+        peekButton.setVisible(false);
+        replayButton.setVisible(gamesPlayed % 5 != 0);
+        startButton.setVisible(gamesPlayed % 5 != 0);
+        upgradesButton.setEnabled(true);
+        historyButton.setEnabled(true);
+        statsButton.setEnabled(true);
+        helpButton.setEnabled(true);
+        saveButton.setEnabled(true);
+        refreshDashboard();
+        checkAchievements();
+        saveProgress();
+        if (gamesPlayed % 5 == 0) SwingUtilities.invokeLater(this::openShop);
+    }
+
+    // ---------- Hand values ----------
+    private int playerTotal() { return handValue(playerHand, true); }
+    private int dealerTotal() { return handValue(dealerHand, false); }
+
+    private int handValue(List<Card> hand, boolean player) {
+        int total = 0;
+        int aces = 0;
+        for (int i = 0; i < hand.size(); i++) {
+            Card c = hand.get(i);
+            int value = c.value();
+            if (c.rank.equals("A")) aces++;
+            if (player) value += cardBonus(c, i);
+            total += value;
+        }
+        while (total > 21 && aces > 0) { total -= 10; aces--; }
+        if (player) {
+            total += bonus("handpoints");
+            if (playerStood) total += bonus("standpoints");
+            if (shieldUsed && total > 21) total = 21;
+        }
+        return total;
+    }
+
+    private int cardBonus(Card c, int index) {
+        int value = bonus("allcards");
+        if (index == 0) value += bonus("firstcard");
+        if (index < 2) value += bonus("openingcards");
+        if (c.rank.equals("A")) value += bonus("aces");
+        if (c.rank.equals("J") || c.rank.equals("Q") || c.rank.equals("K")) value += bonus("faces");
+        if (c.rank.matches("[2-9]") || c.rank.equals("10")) value += bonus("numbercards");
+        if (c.suit.equals("♥")) value += bonus("hearts");
+        if (c.suit.equals("♦")) value += bonus("diamonds");
+        if (c.suit.equals("♠")) value += bonus("spades");
+        if (c.suit.equals("♣")) value += bonus("clubs");
+        return value;
+    }
+
+    private int dealerTarget() { return Math.max(15, Math.min(19, 17 + bonus("dealerstand"))); }
+    private boolean isNatural(List<Card> hand) { return hand.size() == 2 && hand.get(0).value() + hand.get(1).value() == 21; }
+    private boolean containsRank(List<Card> hand, String rank) {
+        for (Card c : hand) if (c.rank.equals(rank)) return true;
+        return false;
+    }
+    private boolean containsRoyalSet(List<Card> hand) {
+        return containsRank(hand, "J") && containsRank(hand, "Q") && containsRank(hand, "K");
+    }
+
+    // ---------- Card rendering ----------
+    private void renderHands(boolean reveal) {
+        dealerCardsPanel.removeAll();
+        playerCardsPanel.removeAll();
+        for (int i = 0; i < dealerHand.size(); i++) {
+            boolean hidden = i == 1 && !reveal && !dealerRevealed;
+            dealerCardsPanel.add(cardView(hidden ? null : dealerHand.get(i), hidden));
+        }
+        for (Card c : playerHand) playerCardsPanel.add(cardView(c, false));
+        if (dealerHand.isEmpty()) dealerTotal.setText("TOTAL  —");
+        else if (reveal || dealerRevealed) dealerTotal.setText("TOTAL  " + dealerTotal());
+        else dealerTotal.setText("SHOWING  " + dealerHand.get(0).value() + "  +  ?");
+        playerTotal.setText("TOTAL  " + (playerHand.isEmpty() ? "0" : playerTotal()));
+        dealerCardsPanel.revalidate(); dealerCardsPanel.repaint();
+        playerCardsPanel.revalidate(); playerCardsPanel.repaint();
+    }
+
+    private JPanel cardView(Card card, boolean hidden) {
+        JPanel panel = new JPanel(new BorderLayout(2, 2));
+        panel.setPreferredSize(new Dimension(82, 112));
+        panel.setBackground(hidden ? new Color(27, 57, 91) : CREAM);
+        panel.setBorder(new CompoundBorder(new LineBorder(hidden ? GOLD : new Color(205, 197, 174), 2, true),
+                new EmptyBorder(6, 7, 6, 7)));
+        if (hidden) {
+            JLabel mark = new JLabel("✦", SwingConstants.CENTER);
+            mark.setForeground(GOLD); mark.setFont(new Font("Serif", Font.BOLD, 38));
+            JLabel back = new JLabel("BUILDER", SwingConstants.CENTER);
+            back.setForeground(Color.WHITE); back.setFont(new Font("Arial", Font.BOLD, 8));
+            panel.add(mark, BorderLayout.CENTER); panel.add(back, BorderLayout.SOUTH);
+        } else if (card != null) {
+            Color ink = (card.suit.equals("♥") || card.suit.equals("♦")) ? RED : new Color(27, 31, 35);
+            JLabel corner = new JLabel(card.rank + card.suit);
+            corner.setForeground(ink); corner.setFont(new Font("Arial", Font.BOLD, 17));
+            JLabel suit = new JLabel(card.suit, SwingConstants.CENTER);
+            suit.setForeground(ink); suit.setFont(new Font("Serif", Font.PLAIN, 37));
+            panel.add(corner, BorderLayout.NORTH); panel.add(suit, BorderLayout.CENTER);
+        }
+        return panel;
+    }
+
+    // ---------- Shop ----------
+    private void openShop() {
+        if (shopOpen) return;
+        shopOpen = true;
+        shopVisits++;
+        int interest = bonus("shopcoins");
+        if (interest > 0) { coins += interest; totalCoinsEarned += interest; }
+        freeRerollUsed = false;
+        refreshDashboard();
+        saveProgress();
+        generateShopOffers();
+        showShopDialog();
+    }
+
+    private void generateShopOffers() {
+        shopOffers.clear();
+        List<Upgrade> available = new ArrayList<Upgrade>();
+        for (Upgrade u : upgradeCatalog) if (!has(u.id)) available.add(u);
+        Collections.shuffle(available, random);
+        for (int i = 0; i < Math.min(5, available.size()); i++) {
+            Upgrade offer = available.get(i).copy();
+            offer.cost = 10 + random.nextInt(19);
+            shopOffers.add(offer);
+        }
+    }
+
+    private void showShopDialog() {
+        if (!shopOpen) return;
+        final JDialog dialog = new JDialog(this, "THE BLACKJACK BUILDER SHOP", true);
+        dialog.setSize(760, 610);
+        dialog.setMinimumSize(new Dimension(690, 540));
+        dialog.setLocationRelativeTo(this);
+        dialog.getContentPane().setBackground(BG);
+        dialog.setLayout(new BorderLayout(10, 10));
+
+        JPanel top = new JPanel(new BorderLayout()); top.setBackground(BG);
+        JLabel title = new JLabel("THE UPGRADE VAULT", SwingConstants.CENTER);
+        title.setForeground(GOLD); title.setFont(new Font("Arial", Font.BOLD, 25));
+        JLabel wallet = new JLabel("YOUR WALLET: " + coins + " COINS", SwingConstants.CENTER);
+        wallet.setForeground(CREAM); wallet.setFont(BOLD);
+        top.add(title, BorderLayout.CENTER); top.add(wallet, BorderLayout.SOUTH);
+        top.setBorder(new EmptyBorder(13, 10, 5, 10));
+        dialog.add(top, BorderLayout.NORTH);
+
+        JPanel list = new JPanel(new GridLayout(0, 1, 8, 8));
+        list.setBackground(BG); list.setBorder(new EmptyBorder(10, 16, 10, 16));
+        if (shopOffers.isEmpty()) {
+            JLabel complete = new JLabel("YOU OWN EVERY UPGRADE! The vault is complete.", SwingConstants.CENTER);
+            complete.setForeground(GOLD); list.add(complete);
+        }
+        for (Upgrade u : shopOffers) list.add(shopOfferRow(u, dialog));
+        JScrollPane scroll = new JScrollPane(list);
+        scroll.setBorder(null); scroll.getViewport().setBackground(BG);
+        dialog.add(scroll, BorderLayout.CENTER);
+
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 8)); footer.setBackground(BG);
+        JButton reroll = makeButton(freeRerollUsed ? "REROLL — 5 COINS" : "FREE REROLL", new Color(89, 83, 134));
+        reroll.setEnabled(!shopOffers.isEmpty() && (freeRerollUsed ? coins >= 5 : true));
+        reroll.addActionListener(e -> {
+            int cost = freeRerollUsed ? 5 : 0;
+            if (coins < cost) return;
+            coins -= cost; totalCoinsSpent += cost; freeRerollUsed = true;
+            generateShopOffers(); dialog.dispose(); refreshDashboard(); showShopDialog();
+        });
+        JButton leave = makeButton("LEAVE SHOP", new Color(102, 77, 63));
+        leave.addActionListener(e -> { dialog.dispose(); closeShop(); });
+        footer.add(reroll); footer.add(leave); dialog.add(footer, BorderLayout.SOUTH);
+        dialog.setVisible(true);
+    }
+
+    private JPanel shopOfferRow(Upgrade u, JDialog dialog) {
+        JPanel row = new JPanel(new BorderLayout(12, 5));
+        row.setBackground(PANEL);
+        row.setBorder(new CompoundBorder(new LineBorder(GOLD, 1, true), new EmptyBorder(9, 12, 9, 12)));
+        JPanel text = new JPanel(); text.setOpaque(false); text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+        JLabel name = new JLabel(u.name); name.setForeground(GOLD); name.setFont(new Font("Arial", Font.BOLD, 15));
+        JLabel desc = new JLabel("<html><div style='width:410px;color:#f5f0df;'>" + u.description + "</div></html>");
+        desc.setFont(SMALL);
+        JLabel category = new JLabel(u.category.toUpperCase() + "  •  " + u.rarity);
+        category.setForeground(MUTED); category.setFont(new Font("Arial", Font.BOLD, 9));
+        text.add(name); text.add(Box.createVerticalStrut(3)); text.add(desc); text.add(Box.createVerticalStrut(3)); text.add(category);
+        JButton buy = makeButton("BUY  " + u.cost, new Color(36, 125, 83));
+        buy.setEnabled(coins >= u.cost);
+        buy.addActionListener(e -> {
+            if (coins < u.cost || has(u.id)) return;
+            coins -= u.cost; totalCoinsSpent += u.cost;
+            Upgrade original = findUpgrade(u.id);
+            if (original != null) ownedUpgrades.add(original);
+            upgradesBought++;
+            seenUpgradeIds.add(u.id);
+            shopOffers.remove(u);
+            checkAchievements(); saveProgress();
+            dialog.dispose();
+            JOptionPane.showMessageDialog(this, u.name + " added to your permanent build!", "UPGRADE ACQUIRED", JOptionPane.INFORMATION_MESSAGE);
+            refreshDashboard();
+            showShopDialog();
+        });
+        row.add(text, BorderLayout.CENTER); row.add(buy, BorderLayout.EAST);
+        return row;
+    }
+
+    private void closeShop() {
+        shopOpen = false;
+        lastResult = "Shop closed. Your upgrades are ready for the next round.";
+        refreshReadyScreen();
+        saveProgress();
+    }
+
+    // ---------- Collection, history, stats, and yeah ----------
+    private void showUpgrades() {
+        if (roundActive || shopOpen) return;
+        JPanel content = new JPanel(); content.setBackground(BG);
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBorder(new EmptyBorder(12, 14, 12, 14));
+        JLabel heading = dialogHeading("YOUR PERMANENT BUILD  •  " + ownedUpgrades.size() + " / " + upgradeCatalog.size());
+        content.add(heading); content.add(Box.createVerticalStrut(10));
+        if (ownedUpgrades.isEmpty()) addDialogLine(content, "No upgrades yet. Play five games to visit the shop.", MUTED);
+        for (Upgrade u : ownedUpgrades) {
+            addDialogLine(content, "★ " + u.name + "  —  " + u.description, CREAM);
+        }
+        addDialogLine(content, "", MUTED);
+        addDialogLine(content, "UNLOCKED COLLECTION", GOLD);
+        for (Upgrade u : upgradeCatalog) {
+            if (!has(u.id)) addDialogLine(content, "◇ " + u.name + "  —  Not acquired", new Color(119, 137, 133));
+        }
+        showScrollDialog("UPGRADE COLLECTION", content, 650, 500);
+    }
+
+    private void showHistory() {
+        if (roundActive || shopOpen) return;
+        JPanel content = new JPanel(); content.setBackground(BG);
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBorder(new EmptyBorder(12, 14, 12, 14));
+        content.add(dialogHeading("RECENT ROUNDS"));
+        if (history.isEmpty()) addDialogLine(content, "Your game history will appear here after your first round.", MUTED);
+        for (String entry : history) addDialogLine(content, entry, CREAM);
+        showScrollDialog("GAME HISTORY", content, 650, 440);
+    }
+
+    private void showStatistics() {
+        if (roundActive || shopOpen) return;
+        JPanel content = new JPanel(); content.setBackground(BG);
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBorder(new EmptyBorder(14, 18, 14, 18));
+        content.add(dialogHeading("CAREER STATISTICS"));
+        addDialogLine(content, "Games played: " + gamesPlayed, CREAM);
+        addDialogLine(content, "Wins / Losses / Pushes: " + wins + " / " + losses + " / " + pushes, CREAM);
+        addDialogLine(content, "Win rate (excluding pushes): " + winRate() + "%", CREAM);
+        addDialogLine(content, "Natural Blackjacks: " + naturalBlackjacks, CREAM);
+        addDialogLine(content, "Current / Best win streak: " + currentStreak + " / " + bestStreak, CREAM);
+        addDialogLine(content, "Coins earned: " + totalCoinsEarned, CREAM);
+        addDialogLine(content, "Coins spent: " + totalCoinsSpent, CREAM);
+        addDialogLine(content, "Coins currently held: " + coins, GOLD);
+        addDialogLine(content, "Upgrades purchased: " + upgradesBought, CREAM);
+        addDialogLine(content, "Double-down wins: " + doubleDownWins, CREAM);
+        addDialogLine(content, "Shops visited: " + shopVisits, CREAM);
+        addDialogLine(content, "Achievements: " + achievements.size() + " / 12", GOLD);
+        showScrollDialog("STATISTICS", content, 560, 500);
+    }
+
+    private double winRate() {
+        int decided = wins + losses;
+        if (decided == 0) return 0.0;
+        return Math.round((wins * 1000.0) / decided) / 10.0;
+    }
+
+    private void showHelp() {
+        if (roundActive || shopOpen) return;
+        String help = "<html><body style='width:470px;color:#f5f0df;font-family:Arial;'>"
+                + "<h2 style='color:#f4c353;'>HOW TO PLAY</h2>"
+                + "<b>Goal:</b> Get closer to 21 than the dealer without going over.<br><br>"
+                + "<b>Hit:</b> Draw one card. <b>Stand:</b> End your turn and let the dealer play. "
+                + "The dealer normally draws until reaching 17.<br><br>"
+                + "<b>Double Down:</b> Available on your first two cards. Draw exactly one card, then stand. "
+                + "Some upgrades add extra rewards for a double-down win.<br><br>"
+                + "<b>Natural Blackjack:</b> An Ace and a ten-value card as your first two cards. "
+                + "A natural beats an ordinary 21.<br><br>"
+                + "<b>Shop:</b> Every five completed games, choose from five random upgrades. "
+                + "Prices are 10–28 coins. Upgrades remain yours for the rest of the saved career.<br><br>"
+                + "<b>Important:</b> Ties and losses award no coins. Wins award 4–7 base coins, "
+                + "before upgrade bonuses. This is a fictional game using in-game coins only."
+                + "</body></html>";
+        JOptionPane.showMessageDialog(this, new JLabel(help), "HOW TO PLAY", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private JLabel dialogHeading(String text) {
+        JLabel label = new JLabel(text); label.setForeground(GOLD);
+        label.setFont(new Font("Arial", Font.BOLD, 17)); label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return label;
+    }
+
+    private void addDialogLine(JPanel panel, String text, Color color) {
+        JLabel label = new JLabel(text); label.setForeground(color); label.setFont(NORMAL);
+        label.setBorder(new EmptyBorder(5, 0, 5, 0)); label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(label);
+    }
+
+    private void showScrollDialog(String title, JPanel content, int width, int height) {
+        JScrollPane scroll = new JScrollPane(content);
+        scroll.setPreferredSize(new Dimension(width, height));
+        scroll.getViewport().setBackground(BG);
+        JOptionPane.showMessageDialog(this, scroll, title, JOptionPane.PLAIN_MESSAGE);
+    }
+
+    // ---------- Achievements ----------
+    private void checkAchievements() {
+        unlock("first_win", "First Victory", "Win your first round.", wins >= 1);
+        unlock("five_wins", "Getting Warmed Up", "Win five rounds.", wins >= 5);
+        unlock("ten_wins", "Table Regular", "Win ten rounds.", wins >= 10);
+        unlock("blackjack_one", "Natural Talent", "Get a natural Blackjack.", naturalBlackjacks >= 1);
+        unlock("blackjack_five", "Ace Collector", "Get five natural Blackjacks.", naturalBlackjacks >= 5);
+        unlock("streak_three", "On a Roll", "Win three rounds in a row.", bestStreak >= 3);
+        unlock("streak_five", "Unstoppable", "Win five rounds in a row.", bestStreak >= 5);
+        unlock("first_upgrade", "Builder Begins", "Purchase your first upgrade.", upgradesBought >= 1);
+        unlock("five_upgrades", "A Growing Build", "Purchase five upgrades.", upgradesBought >= 5);
+        unlock("ten_upgrades", "The Collector", "Purchase ten upgrades.", upgradesBought >= 10);
+        unlock("hundred_coins", "Pocket Change", "Earn 100 coins in total.", totalCoinsEarned >= 100);
+        unlock("all_upgrades", "The Complete Build", "Collect every upgrade.", ownedUpgrades.size() == upgradeCatalog.size());
+    }
+
+    private void unlock(String id, String name, String description, boolean condition) {
+        if (condition && !achievements.contains(id)) {
+            achievements.add(id);
+            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                    "ACHIEVEMENT UNLOCKED\n\n" + name + "\n" + description,
+                    "ACHIEVEMENT!", JOptionPane.INFORMATION_MESSAGE));
+            saveProgress();
+        }
+    }
+
+    // ---------- Upgrade catalog: 40 of me upgrades frfr ----------
+    private void createUpgradeCatalog() {
+        addUpgrade("u01", "Polished Deck", "Every card you draw gets +1 value.", "Card Power", "COMMON", "allcards", 1);
+        addUpgrade("u02", "Masterwork Deck", "Every card you draw gets +2 value.", "Card Power", "RARE", "allcards", 2);
+        addUpgrade("u03", "Ace Academy", "Aces get an additional +1 value.", "Card Power", "COMMON", "aces", 1);
+        addUpgrade("u04", "Royal Ace", "Aces get an additional +2 value.", "Card Power", "RARE", "aces", 2);
+        addUpgrade("u05", "Face-Card Shine", "Jacks, Queens, and Kings get +1 value.", "Card Power", "COMMON", "faces", 1);
+        addUpgrade("u06", "Royal Treatment", "Jacks, Queens, and Kings get +2 value.", "Card Power", "RARE", "faces", 2);
+        addUpgrade("u07", "Number Cruncher", "Number cards get +1 value.", "Card Power", "COMMON", "numbercards", 1);
+        addUpgrade("u08", "Opening Advantage", "Your first two cards get +1 value each.", "Card Power", "RARE", "openingcards", 1);
+        addUpgrade("u09", "Sharp Vision", "Your first card gets +2 value.", "Card Power", "RARE", "firstcard", 2);
+        addUpgrade("u10", "Lucky Hand", "Your final hand total gets +1.", "Hand Bonuses", "COMMON", "handpoints", 1);
+        addUpgrade("u11", "Fortune Hand", "Your final hand total gets +2.", "Hand Bonuses", "RARE", "handpoints", 2);
+        addUpgrade("u12", "Steady Nerves", "Standing adds +1 to your hand total.", "Hand Bonuses", "COMMON", "standpoints", 1);
+        addUpgrade("u13", "Ice-Cold Focus", "Standing adds +2 to your hand total.", "Hand Bonuses", "RARE", "standpoints", 2);
+        addUpgrade("u14", "Heart of the Table", "Heart-suit cards get +1 value.", "Suit Builds", "COMMON", "hearts", 1);
+        addUpgrade("u15", "Diamond Edge", "Diamond-suit cards get +1 value.", "Suit Builds", "COMMON", "diamonds", 1);
+        addUpgrade("u16", "Spade Specialist", "Spade-suit cards get +1 value.", "Suit Builds", "COMMON", "spades", 1);
+        addUpgrade("u17", "Club Champion", "Club-suit cards get +1 value.", "Suit Builds", "COMMON", "clubs", 1);
+        addUpgrade("u18", "Dealer Pressure", "The dealer stands at 16 instead of 17.", "Dealer Tricks", "RARE", "dealerstand", -1);
+        addUpgrade("u19", "Dealer's Dilemma", "The dealer stands at 15 instead of 17.", "Dealer Tricks", "EPIC", "dealerstand", -2);
+        addUpgrade("u20", "Dealer's Challenge", "The dealer must reach 18 before standing.", "Dealer Tricks", "RARE", "dealerstand", 1);
+        addUpgrade("u21", "Dangerous Dealer", "The dealer must reach 19 before standing.", "Dealer Tricks", "EPIC", "dealerstand", 2);
+        addUpgrade("u22", "Safety Net", "Once per round, a total of exactly 22 is saved from busting.", "Defense", "EPIC", "shield22", 1);
+        addUpgrade("u23", "Emergency Cushion", "Once per round, totals of 23 or 24 are saved from busting.", "Defense", "EPIC", "shield24", 1);
+        addUpgrade("u24", "Card Counter's Eye", "Unlocks one peek at the dealer's hidden card each round.", "Utility", "RARE", "peek", 1);
+        addUpgrade("u25", "Better Payout I", "Win +1 extra coin whenever you win.", "Coin Engine", "COMMON", "wincoins", 1);
+        addUpgrade("u26", "Better Payout II", "Win +2 extra coins whenever you win.", "Coin Engine", "RARE", "wincoins", 2);
+        addUpgrade("u27", "High Roller", "Win +3 extra coins whenever you win.", "Coin Engine", "EPIC", "wincoins", 3);
+        addUpgrade("u28", "Blackjack Bonus", "Natural Blackjacks pay +2 coins.", "Coin Engine", "RARE", "naturalcoins", 2);
+        addUpgrade("u29", "Perfect Twenty-One", "Natural Blackjacks pay +4 coins.", "Coin Engine", "EPIC", "naturalcoins", 4);
+        addUpgrade("u30", "Comeback Crown", "Dealer busts give +2 extra coins.", "Coin Engine", "RARE", "dealerbustcoins", 2);
+        addUpgrade("u31", "Close Call", "Winning with 20 or 21 pays +2 coins.", "Coin Engine", "RARE", "highhandcoins", 2);
+        addUpgrade("u32", "Winning Margin", "Winning by at least five points pays +2 coins.", "Coin Engine", "RARE", "margincoins", 2);
+        addUpgrade("u33", "Lucky Sevens", "A winning hand containing a 7 pays +1 coin.", "Coin Engine", "COMMON", "sevencoins", 1);
+        addUpgrade("u34", "Royal Jackpot", "A winning hand with a Jack, Queen, and King pays +3 coins.", "Coin Engine", "EPIC", "royalcoins", 3);
+        addUpgrade("u35", "Double-Down Dividend", "A double-down win pays +2 extra coins.", "Coin Engine", "RARE", "doublecoins", 2);
+        addUpgrade("u36", "Hot Streak", "Each consecutive win after your first adds +1 coin.", "Coin Engine", "EPIC", "streakcoins", 1);
+        addUpgrade("u37", "First Draw Insurance", "Your first card gets +1 extra value.", "Card Power", "COMMON", "firstcard", 1);
+        addUpgrade("u38", "Numbered Fortune", "Cards 2 through 10 get another +1 value.", "Card Power", "RARE", "numbercards", 1);
+        addUpgrade("u39", "Last-Second Barrier", "Once per round, a total of exactly 25 is saved from busting.", "Defense", "EPIC", "shield25", 1);
+        addUpgrade("u40", "Vault Interest", "Every shop visit grants 1 coin.", "Coin Engine", "EPIC", "shopcoins", 1);
+    }
+
+    private void addUpgrade(String id, String name, String description, String category, String rarity, String type, int amount) {
+        upgradeCatalog.add(new Upgrade(id, name, description, category, rarity, type, amount));
+    }
+
+    private Upgrade findUpgrade(String id) {
+        for (Upgrade u : upgradeCatalog) if (u.id.equals(id)) return u;
+        return null;
+    }
+    private boolean has(String id) {
+        for (Upgrade u : ownedUpgrades) if (u.id.equals(id)) return true;
+        return false;
+    }
+    private int bonus(String type) {
+        int total = 0;
+        for (Upgrade u : ownedUpgrades) if (u.type.equals(type)) total += u.amount;
+        return total;
+    }
+
+    // ---------- Save and load ----------
+    private void saveProgress() {
+        Properties data = new Properties();
+        data.setProperty("coins", String.valueOf(coins));
+        data.setProperty("games", String.valueOf(gamesPlayed));
+        data.setProperty("wins", String.valueOf(wins));
+        data.setProperty("losses", String.valueOf(losses));
+        data.setProperty("pushes", String.valueOf(pushes));
+        data.setProperty("naturals", String.valueOf(naturalBlackjacks));
+        data.setProperty("streak", String.valueOf(currentStreak));
+        data.setProperty("bestStreak", String.valueOf(bestStreak));
+        data.setProperty("earned", String.valueOf(totalCoinsEarned));
+        data.setProperty("spent", String.valueOf(totalCoinsSpent));
+        data.setProperty("bought", String.valueOf(upgradesBought));
+        data.setProperty("doubleWins", String.valueOf(doubleDownWins));
+        data.setProperty("shops", String.valueOf(shopVisits));
+        data.setProperty("history", String.join("\n", history));
+        StringBuilder ids = new StringBuilder();
+        for (Upgrade u : ownedUpgrades) { if (ids.length() > 0) ids.append(","); ids.append(u.id); }
+        data.setProperty("owned", ids.toString());
+        StringBuilder ach = new StringBuilder();
+        for (String id : achievements) { if (ach.length() > 0) ach.append(","); ach.append(id); }
+        data.setProperty("achievements", ach.toString());
+        try (FileOutputStream out = new FileOutputStream(SAVE_FILE)) {
+            data.store(out, "Blackjack Builder Deluxe Save Data");
+        } catch (IOException ex) {
+            // Some school coding environments do not permit local file saving.
+        }
+    }
+
+    private void loadProgress() {
+        Properties data = new Properties();
+        try (FileInputStream in = new FileInputStream(SAVE_FILE)) {
+            data.load(in);
+            coins = getInt(data, "coins", coins);
+            gamesPlayed = getInt(data, "games", 0);
+            wins = getInt(data, "wins", 0);
+            losses = getInt(data, "losses", 0);
+            pushes = getInt(data, "pushes", 0);
+            naturalBlackjacks = getInt(data, "naturals", 0);
+            currentStreak = getInt(data, "streak", 0);
+            bestStreak = getInt(data, "bestStreak", 0);
+            totalCoinsEarned = getInt(data, "earned", 0);
+            totalCoinsSpent = getInt(data, "spent", 0);
+            upgradesBought = getInt(data, "bought", 0);
+            doubleDownWins = getInt(data, "doubleWins", 0);
+            shopVisits = getInt(data, "shops", 0);
+            String owned = data.getProperty("owned", "");
+            if (!owned.isEmpty()) for (String id : owned.split(",")) {
+                Upgrade u = findUpgrade(id); if (u != null && !has(id)) ownedUpgrades.add(u);
+            }
+            String ach = data.getProperty("achievements", "");
+            if (!ach.isEmpty()) achievements.addAll(Arrays.asList(ach.split(",")));
+            String oldHistory = data.getProperty("history", "");
+            if (!oldHistory.isEmpty()) history.addAll(Arrays.asList(oldHistory.split("\n")));
+        } catch (IOException ex) {
+            // First launch: start with the default balance and empty collection.
+        }
+    }
+
+    private int getInt(Properties p, String key, int fallback) {
+        try { return Integer.parseInt(p.getProperty(key, String.valueOf(fallback))); }
+        catch (NumberFormatException ex) { return fallback; }
+    }
+
+    private void showMessage(String message) {
+        JOptionPane.showMessageDialog(this, message, "BLACKJACK BUILDER", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    // ---------- Data classes ----------
+    private static class Upgrade {
+        String id, name, description, category, rarity, type;
+        int amount, cost;
+        Upgrade(String id, String name, String description, String category, String rarity, String type, int amount) {
+            this.id = id; this.name = name; this.description = description;
+            this.category = category; this.rarity = rarity; this.type = type; this.amount = amount;
+        }
+        Upgrade copy() {
+            Upgrade copy = new Upgrade(id, name, description, category, rarity, type, amount);
+            copy.cost = cost; return copy;
+        }
+    }
+
+    private static class Card {
+        String rank, suit;
+        Card(String rank, String suit) { this.rank = rank; this.suit = suit; }
+        int value() {
+            if (rank.equals("A")) return 11;
+            if (rank.equals("K") || rank.equals("Q") || rank.equals("J")) return 10;
+            return Integer.parseInt(rank);
+        }
+        public String toString() { return rank + suit; }
+    }
+
+    private static class Deck {
+        private final List<Card> cards = new ArrayList<Card>();
+        private int index = 0;
+        Deck() {
+            String[] suits = {"♠", "♥", "♦", "♣"};
+            String[] ranks = {"A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"};
+            for (String suit : suits) for (String rank : ranks) cards.add(new Card(rank, suit));
+            Collections.shuffle(cards);
+        }
+        Card draw() {
+            if (index >= cards.size()) { Collections.shuffle(cards); index = 0; }
+            return cards.get(index++);
+        }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new MyProgram());
+    }
+}
